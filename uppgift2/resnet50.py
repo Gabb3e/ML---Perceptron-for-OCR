@@ -26,8 +26,8 @@ transform_test = transforms.Compose([
 ])
 
 # dataset raw-img
-train_dataset = datasets.ImageFolder(root='/home/g2de/Documents/programmering/ML/uppgift2/raw-img', transform=transform_train)
-test_dataset = datasets.ImageFolder(root='/home/g2de/Documents/programmering/ML/uppgift2/raw-img', transform=transform_test)
+train_dataset = datasets.ImageFolder(root='/home/g2de/Documents/programmering/ML/ML_Perceptron_for_OCR/uppgift2/raw-img', transform=transform_train)
+test_dataset = datasets.ImageFolder(root='/home/g2de/Documents/programmering/ML/ML_Perceptron_for_OCR/uppgift2/raw-img', transform=transform_test)
 
 classes = ('cane', 'cavallo', 'elefante', 'farfalla', 'gallina', 'gatto', 'mucca', 'pecora', 'ragno', 'scoiattolo')
 
@@ -62,12 +62,13 @@ def save_checkpoint(model, optimizer, epoch, path):
         'optimizer_state_dict': optimizer.state_dict()
     }, path)
 
-def check_accuracy(model, test_loader):
+def check_accuracy(model, test_loader, debug=False):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
     model.eval()  # Set model to evaluation mode
     correct = 0
     total = 0
+
     with torch.no_grad():
         for images, labels in test_loader:
             images, labels = images.to(device), labels.to(device)
@@ -75,7 +76,16 @@ def check_accuracy(model, test_loader):
             _, predicted = torch.max(outputs.data, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
-    return correct / total
+
+            if debug:
+                print(f'Predicted: {predicted}')
+                print(f'Actual: {labels}')
+                print(f"Current batch correct: {(predicted == labels).sum().item()}, Total batch: {labels.size(0)}")
+
+    accuracy = correct / total
+    if debug:
+        print(f"Calculated Accuracy: {accuracy * 100:.2f}%")
+    return accuracy
 
 def plot_metrics(train_losses, train_accs, test_losses, test_accs):
     plt.figure(figsize=(10, 5))
@@ -91,8 +101,13 @@ def plot_metrics(train_losses, train_accs, test_losses, test_accs):
     plt.legend()
     plt.show()
 
+def denormalize(tensor):
+    mean = torch.tensor([0.5, 0.5, 0.5]).view(3, 1, 1)
+    std = torch.tensor([0.5, 0.5, 0.5]).view(3, 1, 1)
+    return tensor * std + mean
+
 # function to display example predictions
-def display_predictions(model, test_loader, num_images=5):
+def display_predictions(model, test_loader, num_images=3):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
     model.eval()  # Set model to evaluation mode
@@ -102,7 +117,8 @@ def display_predictions(model, test_loader, num_images=5):
             outputs = model(images)
             _, predicted = torch.max(outputs, 1)
             for j in range(num_images):
-                plt.imshow(images[j].permute(1, 2, 0).cpu().numpy())
+                img = denormalize(images[j]).permute(1, 2, 0).cpu().numpy()
+                plt.imshow(img)
                 plt.title(f'Predicted: {classes[predicted[j]]}, Actual: {classes[labels[j]]}')
                 plt.show()
             break  # Only display one batch of images
@@ -155,13 +171,14 @@ def train_model(model, train_loader, test_loader, num_epochs=5, learning_rate=0.
             total_train += labels.size(0)
             correct_train += (predicted == labels).sum().item()
 
-        train_losses.append(running_loss / len(train_loader))
+        avg_train_loss = running_loss / len(train_loader)
+        train_losses.append(avg_train_loss)
+
+        model.eval()  # Set model to evaluation mode
         test_loss = 0.0
         correct = 0
         total = 0
 
-        model.eval()  # Set model to evaluation mode
-        
         with torch.no_grad():
             for images, labels in test_loader:
                 images, labels = images.to(device), labels.to(device)
@@ -171,14 +188,24 @@ def train_model(model, train_loader, test_loader, num_epochs=5, learning_rate=0.
                 _, predicted = torch.max(outputs.data, 1)
                 total += labels.size(0)
                 correct += (predicted == labels).sum().item()
-        test_losses.append(test_loss / len(test_loader))
-        train_accs.append(correct / total)
-        test_accs.append(check_accuracy(model, test_loader))
-        print(f'Epoch {epoch + 1}/{num_epochs}, Train Loss: {train_losses[-1]:.4f}, Test Loss: {test_losses[-1]:.4f}, Test Accuracy: {test_accs[-1]:.4f}')
+        
+        avg_test_loss = test_loss / len(test_loader)
+        test_losses.append(avg_test_loss)
+        accuracy = check_accuracy(model, test_loader, debug=True)
+        train_accs.append(accuracy)
+        test_accs.append(accuracy)
+
+        print(f"Epoch {epoch + 1}: Train Loss = {avg_train_loss:.4f} Test Loss = {avg_test_loss:.4f} - Accuracy = {accuracy * 100:.2f}%")
+        # print(f'Epoch {epoch + 1}/{num_epochs}, Train Loss: {train_losses[-1]:.4f}, Test Loss: {test_losses[-1]:.4f}, Test Accuracy: {test_accs[-1]:.4f}')
         
     end_time = time.time()
     elapsed_time = end_time - start_time
+    accuracy = check_accuracy(model, test_loader, debug=True)
+
     print(f"Training finished. Time taken: {elapsed_time:.2f} seconds")
+    print(f"Final accuracy on test set: {test_accs[-1] * 100:.2f}%")
+
+    # print(f"Training finished. Time taken: {elapsed_time:.2f} seconds")
     plot_metrics(train_losses, train_accs, test_losses, test_accs)
     plot_loss_accuracy(train_losses, test_losses)
     display_predictions(model, test_loader)
